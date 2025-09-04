@@ -1,0 +1,73 @@
+name: mac-build
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Опциональные нативные зависимости (для pyzbar нужен zbar)
+      - name: Install native deps (optional)
+        run: |
+          set -e
+          if [ -f requirements.txt ] && grep -qi 'pyzbar' requirements.txt; then
+            brew update
+            brew install zbar
+          fi
+
+      - name: Install pip deps
+        run: |
+          python -m pip install --upgrade pip wheel
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+          python -m pip install pyinstaller
+
+      - name: Clean
+        run: |
+          rm -rf build dist *.spec
+
+      # .app бандл (GUI)
+      - name: Build .app (PyInstaller)
+        run: |
+          pyinstaller --windowed --name "QRMobile" app/app_gui.py
+
+      - name: Show dist
+        run: ls -lah dist
+
+      - name: Zip .app for download
+        run: |
+          cd dist
+          # Упаковываем правильно, чтобы сохранить ресурсы .app
+          ditto -c -k --sequesterRsrc --keepParent "QRMobile.app" "QRMobile-macOS.zip"
+
+      - name: Upload .app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: QRMobile-macOS-app
+          path: dist/QRMobile-macOS.zip
+          if-no-files-found: error
+
+      # Дополнительно: onefile бинарник (без .app)
+      - name: Build onefile (optional)
+        run: |
+          pyinstaller --noconsole --onefile --name "QRMobileOneFile" app/app_gui.py
+
+      - name: Upload onefile binary (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: QRMobile-macOS-onefile
+          path: dist/QRMobileOneFile
+          if-no-files-found: warn
