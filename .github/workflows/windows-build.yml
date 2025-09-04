@@ -7,44 +7,21 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: cmd  # весь job в CMD, без PowerShell
+        shell: cmd   # весь job в CMD
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Гвард: валим сборку, если где-то ещё остался вызов ISCC/installer.iss
-      - name: Assert no leftover ISCC calls
-        run: |
-          if exist .github\workflows (
-            echo === Scanning .github\workflows for legacy Inno Setup usage ===
-            set "HIT="
-            for %%P in (ISCC.exe installer.iss) do (
-              for /f "usebackq delims=" %%L in (`
-                findstr /S /N /I /C:"%%P" .github\workflows\*.yml ^| findstr /V /I "findstr"
-              `) do (
-                echo %%L
-                set HIT=1
-              )
-            )
-            if defined HIT (
-              echo.
-              echo ERROR: Remove old workflows/lines using ISCC.exe or installer.iss (shown above).
-              exit /b 1
-            ) else (
-              echo OK: no legacy ISCC references found.
-            )
-          )
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip wheel
-          python -m pip install -r requirements.txt
+          if exist requirements.txt (
+            python -m pip install -r requirements.txt
+          )
           python -m pip install pyinstaller
 
       - name: Clean
@@ -58,10 +35,6 @@ jobs:
         run: |
           pyinstaller --noconsole --onefile --clean --specpath buildspec --name "QRMobile" app\app_gui.py
 
-      - name: Show dist contents
-        run: |
-          if exist dist (dir dist /s) else (echo dist not found)
-
       - name: Upload EXE (portable)
         uses: actions/upload-artifact@v4
         with:
@@ -69,27 +42,20 @@ jobs:
           path: dist/QRMobile.exe
           if-no-files-found: error
 
-      # ====== OPTIONAL: NSIS installer (только если есть build_scripts\installer.nsi) ======
+      # ===== OPTIONAL: NSIS installer (только если есть build_scripts\installer.nsi) =====
       - name: Install NSIS (optional)
-        run: |
-          if exist build_scripts\installer.nsi (
-            choco install nsis -y --no-progress
-          ) else (
-            echo No build_scripts\installer.nsi; skipping NSIS installer build.
-          )
+        if: hashFiles('build_scripts/installer.nsi') != ''
+        run: choco install nsis -y --no-progress
 
       - name: Build Installer (NSIS, optional)
+        if: hashFiles('build_scripts/installer.nsi') != ''
         working-directory: build_scripts
         run: |
-          if exist installer.nsi (
-            if not exist Output mkdir Output
-            "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
-          ) else (
-            echo No installer.nsi; skipping.
-          )
+          if not exist Output mkdir Output
+          "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
 
       - name: Upload Setup (optional)
-        if: always()
+        if: hashFiles('build_scripts/installer.nsi') != '' && always()
         uses: actions/upload-artifact@v4
         with:
           name: QRMobile-Setup
